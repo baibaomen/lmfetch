@@ -1,23 +1,25 @@
-"""End-to-end acceptance for M3 server, against the REAL qwen3.6 upstream.
+"""End-to-end acceptance for M3 server, against a real OpenAI-compatible vision upstream.
 
-Spins up lmfetch in-process bound to a random localhost port, configured
-to forward to https://llm-dev.baibaomen.com (the real qwen3.6-35b-a3b
-served by llama.cpp on alien). Then drives a vision request through it and
-asserts the round-trip works end-to-end:
+Spins up lmfetch in-process bound to a random localhost port, configured to
+forward to whatever upstream the env vars point at. Then drives a vision
+request through it and asserts the round-trip works end-to-end:
 
-  Client --image_url(http)--> lmfetch --image_url(data:base64)--> llama.cpp --> qwen3.6
+  Client --image_url(http)--> lmfetch --image_url(data:base64)--> upstream --> model
                                                                               |
   Client <--("the image is X")--------- lmfetch <----------------- response <-+
 
-Requires:
-  - BBM_LLM_DEV_TOKEN env var with a valid bearer for llm-dev.baibaomen.com
-  - internet egress (httpbin.org for the test image; llm-dev.baibaomen.com for upstream)
+Configure with:
+  LMFETCH_E2E_UPSTREAM_URL   e.g. http://localhost:8080  (your llama.cpp / vLLM)
+  LMFETCH_E2E_MODEL          e.g. qwen2-vl-7b-instruct
+  LMFETCH_E2E_TOKEN          (optional) bearer token for the upstream
+  LMFETCH_E2E_IMAGE_URL      (optional, default https://httpbin.org/image/png)
 
-Skipped otherwise so unit-only runs stay green.
+Skipped when LMFETCH_E2E_UPSTREAM_URL / LMFETCH_E2E_MODEL aren't set, so unit-only
+runs stay green.
 
-Acceptance reads as a single Jack-visible sentence: "I sent an http://...png URL,
-qwen3.6 saw the actual picture, and answered about it" — and the cache directory
-ends up holding the fetched bytes so the next call can hit warm.
+Acceptance reads as a single user-visible sentence: "I sent an http://...png URL,
+the vision model saw the actual picture, and answered about it" — and the cache
+directory ends up holding the fetched bytes so the next call can hit warm.
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ import os
 import socket
 import threading
 import time
+from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -35,15 +38,19 @@ from lmfetch.downloader import PlainDownloader
 from lmfetch.server import build_app
 
 
-UPSTREAM = "https://llm-dev.baibaomen.com"
-MODEL = "qwen3.6-35b-a3b"
-IMAGE_URL = "https://httpbin.org/image/png"
-TOKEN = os.environ.get("BBM_LLM_DEV_TOKEN", "")
+UPSTREAM = os.environ.get("LMFETCH_E2E_UPSTREAM_URL", "")
+MODEL = os.environ.get("LMFETCH_E2E_MODEL", "")
+IMAGE_URL = os.environ.get("LMFETCH_E2E_IMAGE_URL", "https://httpbin.org/image/png")
+TOKEN = os.environ.get("LMFETCH_E2E_TOKEN", "")
 
 
 def _net_ok() -> bool:
+    if not UPSTREAM:
+        return False
+    host = urlparse(UPSTREAM).hostname or ""
+    port = urlparse(UPSTREAM).port or (443 if UPSTREAM.startswith("https") else 80)
     try:
-        with socket.create_connection(("llm-dev.baibaomen.com", 443), timeout=3):
+        with socket.create_connection((host, port), timeout=3):
             pass
         with socket.create_connection(("httpbin.org", 443), timeout=3):
             return True
@@ -52,8 +59,8 @@ def _net_ok() -> bool:
 
 
 pytestmark = [
-    pytest.mark.skipif(not TOKEN, reason="BBM_LLM_DEV_TOKEN not set"),
-    pytest.mark.skipif(not _net_ok(), reason="upstream/image host not reachable"),
+    pytest.mark.skipif(not (UPSTREAM and MODEL), reason="LMFETCH_E2E_UPSTREAM_URL / LMFETCH_E2E_MODEL not set"),
+    pytest.mark.skipif(not _net_ok(), reason="upstream / image host not reachable"),
 ]
 
 
@@ -113,7 +120,7 @@ def _vision_request(model=MODEL, image_url=IMAGE_URL, prompt="What is the domina
     }
 
 
-def test_e2e_m3_qwen_via_lmfetch(lmfetch_server) -> None:
+def test_e2e_m3_vision_via_lmfetch(lmfetch_server) -> None:
     base, cache = lmfetch_server
 
     with httpx.Client(timeout=120) as c:
@@ -123,25 +130,24 @@ def test_e2e_m3_qwen_via_lmfetch(lmfetch_server) -> None:
             json=_vision_request(),
         )
 
-    assert r.status_code == 200, f"lmfetch->qwen failed: {r.status_code} {r.text[:500]}"
+    assert r.status_code == 200, f"lmfetch->upstream failed: {r.status_code} {r.text[:500]}"
     body = r.json()
     content = body["choices"][0]["message"]["content"].strip()
-    print(f"\n[E2E] qwen via lmfetch said: {content!r}\n")
-    assert content, "qwen produced empty content (max_tokens too small? thinking ate it?)"
-    # The Wikipedia transparency demo PNG shows a tabletop game / dice. The model
-    # must produce *something* image-derived; we don't pin exact wording but require
+    print(f"\n[E2E] vision model via lmfetch said: {content!r}\n")
+    assert content, "model produced empty content (max_tokens too small? thinking ate it?)"
+    # The model must produce *something* image-derived; we don't pin exact wording but require
     # the response is plausibly about an image, not a generic refusal.
     refusals = ["i cannot", "unable to", "no image", "as a text-only"]
     low = content.lower()
-    assert not any(r in low for r in refusals), f"qwen refused to look at image: {content}"
+    assert not any(r in low for r in refusals), f"model refused to look at image: {content}"
 
     hits = cache.get(IMAGE_URL)
     assert len(hits) == 1, "lmfetch should have cached exactly one version of the source image"
     assert hits[0].size > 1000, "cached blob suspiciously small for a PNG"
 
 
-def test_e2e_m3_qwen_warm_cache_no_refetch(lmfetch_server) -> None:
-    """Second turn for the same URL: lmfetch must not re-download — qwen still sees the picture."""
+def test_e2e_m3_warm_cache_no_refetch(lmfetch_server) -> None:
+    """Second turn for the same URL: lmfetch must not re-download — model still sees the picture."""
     base, cache = lmfetch_server
 
     with httpx.Client(timeout=120) as c:
@@ -163,7 +169,7 @@ def test_e2e_m3_qwen_warm_cache_no_refetch(lmfetch_server) -> None:
     assert r2.status_code == 200, r2.text[:500]
     body = r2.json()
     content = body["choices"][0]["message"]["content"].strip()
-    print(f"\n[E2E warm] qwen via lmfetch (warm cache) said: {content!r}\n")
+    print(f"\n[E2E warm] vision model via lmfetch (warm cache) said: {content!r}\n")
     assert content
     assert cache.total_bytes() == size_after_first, "no new bytes should have entered cache"
     assert len(list((cache.root / "blobs").rglob("*.bin"))) == first_blob_count

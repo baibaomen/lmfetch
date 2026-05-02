@@ -9,7 +9,8 @@ Behaviors under test (unit-level, against fake upstream):
   - Already-data: URLs are passed through (not re-fetched, not re-encoded).
   - Cache hit on second call to same URL — Downloader is invoked exactly once across two requests.
 
-A separate test module (test_e2e_m3.py) drives this against the real qwen3.6 upstream.
+A separate test module (test_e2e_m3.py) drives this against a real OpenAI-compatible
+vision upstream (configured via `LMFETCH_E2E_*` env vars).
 """
 from __future__ import annotations
 

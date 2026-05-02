@@ -7,9 +7,10 @@ Reads:
   LMFETCH_HOST               (default 0.0.0.0)
   LMFETCH_PORT               (default 8000)
 
-This intentionally does NOT support proxy / spoof routing yet — the alien
-deployment talks to local upstreams only and to the open internet directly.
-Routing config (YAML) lands when an actual deployment needs it.
+This intentionally does NOT expose proxy / spoof routing yet — the simple
+deployment shape (lmfetch in front of a local inference container, fetching
+public URLs directly) doesn't need it. Per-domain routing config lands when
+an actual deployment requires it.
 """
 from __future__ import annotations
 

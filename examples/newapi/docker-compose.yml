@@ -1,0 +1,38 @@
+# Example: lmfetch sitting between an OpenAI-compatible gateway (new-api / one-api /
+# LiteLLM) and a vision-capable inference server (llama.cpp / vLLM / SGLang).
+#
+#   gateway  --image_url(http)-->  lmfetch  --image_url(data:base64)-->  inference
+#
+# Adjust:
+#   - `LMFETCH_UPSTREAM_URL` to point at your inference container/host;
+#   - the external network name to whatever your gateway stack created;
+#   - `LMFETCH_CACHE_MAX_BYTES` to your disk budget.
+#
+# Then in your gateway, set the channel's base_url to `http://lmfetch:8000`.
+
+name: lmfetch
+
+services:
+  lmfetch:
+    image: ghcr.io/baibaomen/lmfetch:latest
+    container_name: lmfetch
+    restart: unless-stopped
+    environment:
+      LMFETCH_UPSTREAM_URL: "http://inference:8080"
+      LMFETCH_CACHE_DIR: "/var/lib/lmfetch/cache"
+      LMFETCH_CACHE_MAX_BYTES: "10737418240"   # 10 GiB
+      LMFETCH_HOST: "0.0.0.0"
+      LMFETCH_PORT: "8000"
+    volumes:
+      - ./cache:/var/lib/lmfetch/cache
+    networks:
+      - gateway-net
+    expose:
+      - "8000"
+
+networks:
+  # Replace with the network your gateway + inference containers already share,
+  # so DNS resolves `inference` (and the gateway resolves `lmfetch`).
+  gateway-net:
+    external: true
+    name: your-gateway-network

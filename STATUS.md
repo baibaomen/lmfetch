@@ -1,53 +1,56 @@
 # lmfetch — STATUS
 
-> 路线图视角：从「llama.cpp 同步 URL 拉图老踩坑」走到「engine-agnostic 的图片 fetch+cache sidecar，主流引擎都能直接挂上」。
+> Roadmap view: from "the inference server keeps tripping over `image_url` URLs"
+> to "an engine-agnostic image fetch + cache sidecar that any OpenAI-compatible
+> vision engine can drop in front of."
 
-## 总体路线图
+## Roadmap
 
 ```
-现状：llama.cpp / vLLM / SGLang 都内置「服务端拉 image_url」逻辑。
-       拉不到就 500，拉得到也每次重拉，硬编码 10MB / 10s，无法定制 UA / 代理。
-       ↓
-M0  仓库脚手架（README/LICENSE/pyproject/包骨架）       ← 现在
-       ↓
-M1  cache：URL+内容双哈希 CAS、SQLite 索引、LRU 配额淘汰   （TDD）
-       ↓
-M2  downloader：plain / proxied / browser-spoof 三种内置  （TDD）
-       并提供按域名规则路由的注册机制
-       ↓
-M3  server：FastAPI 透传 OpenAI vision 协议
-       消息里所有 image_url → 走 cache → 替换为 data:base64
-       下游（llama.cpp / vLLM / …）只看到 data URL
-       ↓
-M4  placeholder：拉不到也不抛，回 not_available.png
-       ↓
-M5  部署：alien 上 docker-compose，挂在 new-api 与 llama-server 之间
-       ↓
-M6  开源发布：v0.1，docs，examples（llama.cpp + vLLM compose）
-       ↓
-M7  上游回馈：把 max_size/timeout 配置化先 PR 到 llama.cpp；
-            视情况贡献 C++ 版 cache 模块
+Today: llama.cpp / vLLM / SGLang all implement "server-side fetch image_url"
+        inside the inference process. Failures 500 the chat. Successful fetches
+        re-download per-turn. Limits are hard-coded (10 MB / 10 s on llama.cpp).
+        No way to customize User-Agent, route via proxy, or persist results.
+        ↓
+M0   Repo scaffold (README / LICENSE / pyproject / package skeleton)
+        ↓
+M1   Cache: URL+content double-hash CAS, SQLite index, LRU eviction (TDD)
+        ↓
+M2   Downloader: plain / proxied / browser-spoof, per-domain rule routing (TDD)
+        ↓
+M3   Server: FastAPI passthrough of OpenAI vision protocol
+        every image_url → cache lookup → replace with data:base64
+        downstream engine only ever sees data: URLs
+        ↓
+M4   Placeholder: when a URL can't be fetched, serve a built-in "not available"
+        PNG instead of 500-ing the chat
+        ↓
+M5   Deployment: docker-compose example sitting between an OpenAI gateway
+        (one-api / LiteLLM) and a local llama.cpp server, with cache persistence
+        ↓
+M6   v0.1 OSS launch: README quickstart, examples (llama.cpp + vLLM compose),
+        CHANGELOG, CI, GHCR image
+        ↓
+M7   Upstream contributions: PR llama.cpp to make max_size / timeout configurable;
+        contribute a C++ port of the cache module if it lands well
 ```
 
-## 当前位置
+## Progress
 
-- [x] M0 脚手架
-- [x] M1 cache（CAS + LRU + 多版本，TDD 全绿 + e2e 验收）
-- [x] M2 downloader（plain / spoof / proxied + 域名路由，e2e 真实 httpbin/proxy 验收）
-- [x] M3 server（FastAPI 透传，image_url → data:base64，**真实 qwen3.6 e2e 通过**）
-- [x] M4 placeholder 接线（fetch 失败回 not_available.png，**qwen3.6 读出 "Image Not Available"**）
-- [x] M5 alien 部署（Dockerfile + compose 接到 llm-dev new-api 和 local-llm-server 之间，
-  **真线 vision 请求过 lmfetch 缓存命中后 qwen 仍正常回答**）
-- [ ] M6 OSS 发布（下一步）
-- [ ] M5 alien 部署
-- [ ] M6 OSS 发布
-- [ ] M7 上游 PR
+- [x] M0 scaffold
+- [x] M1 cache (CAS + LRU + multi-version, TDD + e2e green)
+- [x] M2 downloader (plain / spoof / proxied + domain router, e2e against real httpbin / a local forward proxy)
+- [x] M3 server (FastAPI passthrough, image_url → data:base64, **real-vision-model e2e green**)
+- [x] M4 placeholder (FetchError → bundled PNG, **the model reads back "Image Not Available"**)
+- [x] M5 deployment (Dockerfile + compose example wired between an OpenAI gateway and llama.cpp; verified end-to-end with a real vision request, including warm-cache reuse)
+- [ ] M6 v0.1 OSS launch (next)
+- [ ] M7 upstream PR
 
-## 验收口径（Jack 视角）
+## Acceptance (user-visible, milestone-by-milestone)
 
-- M1 完成：跑 `pytest`，全绿；同 URL 灌两个不同字节内容，目录里能看到两个版本，`Cache.get(url)` 都返回。
-- M2 完成：用一个被 GFW 封的图片地址（如 google CDN）配上 proxied 规则，能下载下来。
-- M3 完成：客户端发 `{"type":"image_url","url":"https://..."}`，下游 llama.cpp 收到的是 `data:image/png;base64,...`，回答正确。
-- M4 完成：故意把 URL 写成 404，整个链路不 500，模型收到一张写着 "Image Not Available" 的图。
-- M5 完成：alien 上能从 new-api 走 lmfetch 走 llama-server 完整识别一张 minio 图。
-- M6 完成：发个 v0.1 release tag，README 里 examples 别人能 docker-compose up 直接用。
+- M1 done: `pytest` green; feed two different content bytes for the same URL → both versions present on disk, `Cache.get(url)` returns both.
+- M2 done: a hotlink-blocked image URL fetched successfully via a `BrowserSpoofDownloader` rule with a realistic UA + Referer.
+- M3 done: client sends `{"type":"image_url","url":"https://..."}`; downstream engine receives `data:image/png;base64,...`; the model answers correctly about the picture.
+- M4 done: deliberately bad URL — the chat still completes, the model receives the placeholder and reports it as such.
+- M5 done: example compose stack (gateway → lmfetch → llama.cpp) starts clean; vision request flows end-to-end; cache directory accumulates blobs; second turn for the same URL reuses cache (blob count unchanged).
+- M6 done: `v0.1.0` release tag exists; `examples/` compose files come up with `docker compose up`; README quickstart works for someone who's never seen the repo.
