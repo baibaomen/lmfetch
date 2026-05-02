@@ -3,7 +3,7 @@ name = "lmfetch"
 version = "0.0.1"
 description = "Image fetch + cache sidecar for OpenAI-compatible vision APIs"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 authors = [{ name = "baibaomen", email = "baibaomen@gmail.com" }]
 keywords = ["llm", "vision", "cache", "proxy", "openai", "llama.cpp", "vllm"]
