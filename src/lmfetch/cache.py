@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -57,14 +58,21 @@ class Cache:
         self.blobs_dir = self.root / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
         self._db_path = self.root / "index.sqlite3"
-        self._conn = sqlite3.connect(self._db_path, isolation_level=None)
+        self._conn = sqlite3.connect(
+            self._db_path, isolation_level=None, check_same_thread=False
+        )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._lock = threading.RLock()
 
     def close(self) -> None:
         self._conn.close()
 
     def put(self, url: str, content: bytes) -> CacheEntry:
+        with self._lock:
+            return self._put_locked(url, content)
+
+    def _put_locked(self, url: str, content: bytes) -> CacheEntry:
         url_hash = _sha256_hex(url)
         content_hash = _sha256_hex(content)
         now = time.time()
@@ -115,6 +123,10 @@ class Cache:
         )
 
     def get(self, url: str) -> list[CacheEntry]:
+        with self._lock:
+            return self._get_locked(url)
+
+    def _get_locked(self, url: str) -> list[CacheEntry]:
         url_hash = _sha256_hex(url)
         rows = self._conn.execute(
             "SELECT content_hash, blob_path, size, created_at, last_used"
@@ -142,6 +154,10 @@ class Cache:
         ]
 
     def total_bytes(self) -> int:
+        with self._lock:
+            return self._total_bytes_locked()
+
+    def _total_bytes_locked(self) -> int:
         row = self._conn.execute("SELECT COALESCE(SUM(size), 0) FROM entries").fetchone()
         return int(row[0])
 

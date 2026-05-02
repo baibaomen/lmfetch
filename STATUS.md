@@ -32,17 +32,10 @@ M7  上游回馈：把 max_size/timeout 配置化先 PR 到 llama.cpp；
 ## 当前位置
 
 - [x] M0 脚手架
-  - [x] GitHub repo 建好（baibaomen/lmfetch, MIT, public）
-  - [x] README 写完
-  - [x] LICENSE 改正作者
-  - [x] pyproject.toml
-  - [x] 包骨架 `src/lmfetch/`
-  - [ ] placeholder PNG 生成
-  - [ ] 初次 commit + push
-- [ ] M1 cache（下一步进入 TDD）
-- [ ] M2 downloader
-- [ ] M3 server
-- [ ] M4 placeholder 接线
+- [x] M1 cache（CAS + LRU + 多版本，TDD 全绿 + e2e 验收）
+- [x] M2 downloader（plain / spoof / proxied + 域名路由，e2e 真实 httpbin/proxy 验收）
+- [x] M3 server（FastAPI 透传，image_url → data:base64，**真实 qwen3.6 e2e 通过**）
+- [ ] M4 placeholder 接线（下一步）
 - [ ] M5 alien 部署
 - [ ] M6 OSS 发布
 - [ ] M7 上游 PR
