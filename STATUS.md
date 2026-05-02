@@ -35,7 +35,8 @@ M7  上游回馈：把 max_size/timeout 配置化先 PR 到 llama.cpp；
 - [x] M1 cache（CAS + LRU + 多版本，TDD 全绿 + e2e 验收）
 - [x] M2 downloader（plain / spoof / proxied + 域名路由，e2e 真实 httpbin/proxy 验收）
 - [x] M3 server（FastAPI 透传，image_url → data:base64，**真实 qwen3.6 e2e 通过**）
-- [ ] M4 placeholder 接线（下一步）
+- [x] M4 placeholder 接线（fetch 失败回 not_available.png，**qwen3.6 读出 "Image Not Available"**）
+- [ ] M5 alien 部署（下一步）
 - [ ] M5 alien 部署
 - [ ] M6 OSS 发布
 - [ ] M7 上游 PR

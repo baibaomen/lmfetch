@@ -161,6 +161,43 @@ def test_data_url_passes_through(fake_upstream, tmp_path: Path) -> None:
     assert last["body"]["messages"][0]["content"][0]["image_url"]["url"] == data_url
 
 
+def test_fetch_error_falls_back_to_placeholder(fake_upstream, tmp_path: Path) -> None:
+    """When the downloader can't reach the URL, the request still goes through —
+    the model receives the bundled 'Image Not Available' placeholder PNG."""
+    from lmfetch.server import build_app
+    from lmfetch.cache import Cache
+    from lmfetch.downloader import FetchError
+    from lmfetch.placeholder import PLACEHOLDER_PATH
+
+    srv, last = fake_upstream
+
+    class AlwaysFails:
+        def fetch(self, url):
+            raise FetchError(f"simulated unreachable: {url}")
+
+    cache = Cache(tmp_path / "cache", max_bytes=10 * 1024 * 1024)
+    host, port = srv.server_address
+    app = build_app(cache=cache, downloader=AlwaysFails(), upstream_url=f"http://{host}:{port}")
+
+    payload = {
+        "model": "x",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": {"url": "http://unreachable.invalid/x.png"}},
+            ],
+        }],
+    }
+    r = _post(app, payload)
+    assert r.status_code == 200
+    forwarded = last["body"]["messages"][0]["content"]
+    out_url = forwarded[1]["image_url"]["url"]
+    assert out_url.startswith("data:image/png;base64,")
+    decoded = base64.b64decode(out_url.split(",", 1)[1])
+    assert decoded == PLACEHOLDER_PATH.read_bytes(), "must forward the bundled placeholder bytes"
+
+
 def test_cache_hit_avoids_second_download(fake_upstream, origin_image, tmp_path: Path) -> None:
     up_srv, _last = fake_upstream
     img_srv, _img_bytes, hits = origin_image

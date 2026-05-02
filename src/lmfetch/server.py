@@ -21,8 +21,13 @@ from fastapi.responses import Response
 
 from .cache import Cache
 from .downloader import Downloader, FetchError
+from .placeholder import PLACEHOLDER_PATH
 
 log = logging.getLogger("lmfetch.server")
+
+
+_PLACEHOLDER_BYTES = PLACEHOLDER_PATH.read_bytes()
+_PLACEHOLDER_CT = "image/png"
 
 
 def _resolve_image_url(url: str, cache: Cache, downloader: Downloader) -> tuple[bytes, str]:
@@ -64,10 +69,8 @@ def _rewrite_messages(messages: list[dict[str, Any]], cache: Cache, downloader: 
             try:
                 data, ct = _resolve_image_url(url, cache, downloader)
             except FetchError as e:
-                log.warning("fetch failed for %s: %s", url, e)
-                # M4 will swap in placeholder here; M3 surfaces the error
-                # so the failure mode is loud during M3 work.
-                raise
+                log.warning("fetch failed for %s, serving placeholder: %s", url, e)
+                data, ct = _PLACEHOLDER_BYTES, _PLACEHOLDER_CT
             b64 = base64.b64encode(data).decode("ascii")
             part["image_url"] = {"url": f"data:{ct};base64,{b64}"}
 
